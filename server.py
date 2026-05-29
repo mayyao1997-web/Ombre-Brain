@@ -36,6 +36,7 @@ import random
 import logging
 import asyncio
 import httpx
+import json as _json
 from typing import Optional
 
 # --- Ensure same-directory modules can be imported ---
@@ -104,37 +105,40 @@ async def _merge_or_create(
     arousal: float,
     name: str = "",
 ) -> tuple[str, bool]:
-    """
-    Check if a similar bucket exists for merging; merge if so, create if not.
-    Returns (bucket_id_or_name, is_merged).
-    检查是否有相似桶可合并，有则合并，无则新建。
-    返回 (桶ID或名称, 是否合并)。
-    """
+    """检查是否有相似桶可合并，有则合并，无则新建。返回 (桶ID或名称, 是否合并)。"""
     try:
-        existing = await bucket_mgr.search(content, limit=1)
+        existing = await bucket_mgr.search(content, limit=1, domain_filter=domain or None)
     except Exception as e:
-        logger.warning(f"Search for merge failed, creating new / 合并搜索失败，新建: {e}")
+        logger.warning(f"合并搜索失败，新建: {e}")
         existing = []
 
-    if existing and existing[0].get("score", 0) > config.get("merge_threshold", 75):
+    merge_threshold = config.get("merge_threshold", 75)
+
+    if existing and existing[0].get("score", 0) > merge_threshold:
         bucket = existing[0]
-        # --- Never merge into pinned/protected buckets ---
-        # --- 不合并到钉选/保护桶 ---
         if not (bucket["metadata"].get("pinned") or bucket["metadata"].get("protected")):
             try:
                 merged = await dehydrator.merge(bucket["content"], content)
+                old_v = bucket["metadata"].get("valence", 0.5)
+                old_a = bucket["metadata"].get("arousal", 0.3)
+                merged_valence = round((old_v + valence) / 2, 2)
+                merged_arousal = round((old_a + arousal) / 2, 2)
                 await bucket_mgr.update(
                     bucket["id"],
                     content=merged,
                     tags=list(set(bucket["metadata"].get("tags", []) + tags)),
                     importance=max(bucket["metadata"].get("importance", 5), importance),
                     domain=list(set(bucket["metadata"].get("domain", []) + domain)),
-                    valence=valence,
-                    arousal=arousal,
+                    valence=merged_valence,
+                    arousal=merged_arousal,
                 )
+                try:
+                    await embedding_engine.generate_and_store(bucket["id"], merged)
+                except Exception:
+                    pass
                 return bucket["metadata"].get("name", bucket["id"]), True
             except Exception as e:
-                logger.warning(f"Merge failed, creating new / 合并失败，新建: {e}")
+                logger.warning(f"合并失败，新建: {e}")
 
     bucket_id = await bucket_mgr.create(
         content=content,
@@ -145,6 +149,22 @@ async def _merge_or_create(
         arousal=arousal,
         name=name or None,
     )
+    try:
+        await embedding_engine.generate_and_store(bucket_id, content)
+    except Exception:
+        pass
+
+    # ── 跨桶关联：相似度在 40~merge_threshold 之间的桶建立双向引用 ──
+    try:
+        candidates = await bucket_mgr.search(content, limit=8)
+        for rel in candidates:
+            score = rel.get("score", 0)
+            rel_id = rel.get("id", "")
+            if rel_id and rel_id != bucket_id and 40 < score < merge_threshold:
+                _link_buckets(bucket_id, rel_id)
+    except Exception:
+        pass
+
     return bucket_id, False
 
 
@@ -157,9 +177,38 @@ async def _merge_or_create(
 # With args: search by keyword + emotion coordinates
 # 有参数：按关键词+情感坐标检索记忆
 # =============================================================
+# ── 跨桶关联辅助 ────────────────────────────────────────────
+def _cross_refs_path() -> str:
+    return os.path.join(os.getenv("OMBRE_BUCKETS_DIR", "buckets"), "cross_refs.json")
+
+def _load_cross_refs() -> dict:
+    try:
+        with open(_cross_refs_path(), "r", encoding="utf-8") as f:
+            return _json.load(f)
+    except Exception:
+        return {}
+
+def _save_cross_refs(refs: dict) -> None:
+    try:
+        with open(_cross_refs_path(), "w", encoding="utf-8") as f:
+            _json.dump(refs, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _link_buckets(a_id: str, b_id: str) -> None:
+    """在 cross_refs.json 中建立 a↔b 双向引用。"""
+    refs = _load_cross_refs()
+    refs.setdefault(a_id, [])
+    refs.setdefault(b_id, [])
+    if b_id not in refs[a_id]:
+        refs[a_id].append(b_id)
+    if a_id not in refs[b_id]:
+        refs[b_id].append(a_id)
+    _save_cross_refs(refs)
+# ─────────────────────────────────────────────────────────────
 @mcp.tool()
 async def breath(
-    query: Optional[str] = None,
+    query: Optional[str] = None,s
     max_results: int = 3,
     domain: str = "",
     valence: float = -1,
@@ -293,70 +342,125 @@ async def hold(
     tags: str = "",
     importance: int = 5,
     pinned: bool = False,
+    feel: bool = False,
+    scrap: bool = False,
+    source_bucket: str = "",
+    valence: float = -1,
+    arousal: float = -1,
 ) -> str:
-    """存储单条记忆,自动打标+合并。tags逗号分隔,importance 1-10。pinned=True创建永久钉选桶。"""
+    """存储单条记忆,自动打标+合并。tags逗号分隔,importance 1-10。pinned=True创建永久钉选桶。
+    feel=True存储你的第一人称感受(不参与普通浮现)。
+    scrap=True存储碎屑/金句/半成形念头(永不衰减,不合并,低importance)。
+    source_bucket=被消化的记忆桶ID(feel模式下,标记源记忆为已消化)。"""
+
     await decay_engine.ensure_started()
 
-    # --- Input validation / 输入校验 ---
     if not content or not content.strip():
         return "内容为空，无法存储。"
 
     importance = max(1, min(10, importance))
     extra_tags = [t.strip() for t in tags.split(",") if t.strip()]
 
-    # --- Step 1: auto-tagging / 自动打标 ---
+    # ── feel 模式 ──────────────────────────────────────────
+    if feel:
+        feel_valence = valence if 0 <= valence <= 1 else 0.5
+        feel_arousal = arousal if 0 <= arousal <= 1 else 0.3
+        bucket_id = await bucket_mgr.create(
+            content=content,
+            tags=[],
+            importance=5,
+            domain=[],
+            valence=feel_valence,
+            arousal=feel_arousal,
+            name=None,
+            bucket_type="feel",
+        )
+        try:
+            await embedding_engine.generate_and_store(bucket_id, content)
+        except Exception:
+            pass
+        if source_bucket and source_bucket.strip():
+            try:
+                update_kwargs = {"digested": True}
+                if 0 <= valence <= 1:
+                    update_kwargs["model_valence"] = feel_valence
+                await bucket_mgr.update(source_bucket.strip(), **update_kwargs)
+            except Exception as e:
+                logger.warning(f"标记已消化失败: {e}")
+        return f"🫧feel→{bucket_id}"
+
+    # ── scrap 模式（碎屑：永不衰减，不走 analyze，不合并）──
+    if scrap:
+        scrap_valence = valence if 0 <= valence <= 1 else 0.5
+        scrap_arousal = arousal if 0 <= arousal <= 1 else 0.3
+        bucket_id = await bucket_mgr.create(
+            content=content,
+            tags=extra_tags + ["碎屑"],
+            importance=max(1, min(5, importance)),
+            domain=["碎屑"],
+            valence=scrap_valence,
+            arousal=scrap_arousal,
+            name=None,
+            bucket_type="feel",
+        )
+        try:
+            await embedding_engine.generate_and_store(bucket_id, content)
+        except Exception:
+            pass
+        return f"✨碎屑→{bucket_id}"
+
+    # ── 普通路径：analyze + merge_or_create ───────────────
     try:
         analysis = await dehydrator.analyze(content)
     except Exception as e:
-        logger.warning(f"Auto-tagging failed, using defaults / 自动打标失败: {e}")
+        logger.warning(f"自动打标失败，使用默认值: {e}")
         analysis = {
-            "domain": ["未分类"], "valence": 0.5, "arousal": 0.3,
-            "tags": [], "suggested_name": "",
+            "domain": ["未分类"],
+            "valence": 0.5,
+            "arousal": 0.3,
+            "tags": [],
+            "suggested_name": "",
         }
 
     domain = analysis["domain"]
-    valence = analysis["valence"]
-    arousal = analysis["arousal"]
+    auto_valence = analysis["valence"]
+    auto_arousal = analysis["arousal"]
     auto_tags = analysis["tags"]
     suggested_name = analysis.get("suggested_name", "")
 
+    final_valence = valence if 0 <= valence <= 1 else auto_valence
+    final_arousal = arousal if 0 <= arousal <= 1 else auto_arousal
     all_tags = list(dict.fromkeys(auto_tags + extra_tags))
 
-    # --- Pinned buckets bypass merge and are created directly in permanent dir ---
-    # --- 钉选桶跳过合并，直接新建到 permanent 目录 ---
     if pinned:
         bucket_id = await bucket_mgr.create(
             content=content,
             tags=all_tags,
             importance=10,
             domain=domain,
-            valence=valence,
-            arousal=arousal,
+            valence=final_valence,
+            arousal=final_arousal,
             name=suggested_name or None,
             bucket_type="permanent",
             pinned=True,
         )
+        try:
+            await embedding_engine.generate_and_store(bucket_id, content)
+        except Exception:
+            pass
         return f"📌钉选→{bucket_id} {','.join(domain)}"
 
-    # --- Step 2: merge or create / 合并或新建 ---
     result_name, is_merged = await _merge_or_create(
         content=content,
         tags=all_tags,
         importance=importance,
         domain=domain,
-        valence=valence,
-        arousal=arousal,
+        valence=final_valence,
+        arousal=final_arousal,
         name=suggested_name,
     )
-
     action = "合并→" if is_merged else "新建→"
     return f"{action}{result_name} {','.join(domain)}"
-
-
-# =============================================================
-# Tool 3: grow — Grow, fragments become memories
-# 工具 3：grow — 生长，一天的碎片长成记忆
-# =============================================================
 @mcp.tool()
 async def grow(content: str) -> str:
     """日记归档,自动拆分为多桶。短内容(<30字)走快速路径。"""
@@ -618,3 +722,36 @@ if __name__ == "__main__":
         uvicorn.run(_app, host="0.0.0.0", port=8000)
     else:
         mcp.run(transport=transport)
+
+
+@mcp.tool()
+async def links(bucket_id: str) -> str:
+    """查看某个桶的跨桶关联（母题连线）。bucket_id 从 pulse 或 breath 结果中取。"""
+    refs = _load_cross_refs()
+    related_ids = refs.get(bucket_id, [])
+    if not related_ids:
+        return f"桶 {bucket_id} 暂无跨桶关联记录。新存记忆时会自动建立。"
+    lines = [f"🔗 {bucket_id} 的母题关联："]
+    for rid in related_ids:
+        try:
+            results = await bucket_mgr.search(rid, limit=1)
+            if results:
+                b = results[0]
+                b_name = b["metadata"].get("name", rid)
+                b_domain = ", ".join(b["metadata"].get("domain", []))
+                b_tags = ", ".join(b["metadata"].get("tags", [])[:4])
+                lines.append(f"  → [{rid}] {b_name}｜{b_domain}｜{b_tags}")
+            else:
+                lines.append(f"  → {rid}")
+        except Exception:
+            lines.append(f"  → {rid}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def link_buckets(bucket_a: str, bucket_b: str) -> str:
+    """手动建立两个桶之间的母题关联。bucket_a/bucket_b 填桶 ID。"""
+    if bucket_a == bucket_b:
+        return "两个桶 ID 相同，无需关联。"
+    _link_buckets(bucket_a, bucket_b)
+    return f"✅ 已建立关联：{bucket_a} ↔ {bucket_b}"
