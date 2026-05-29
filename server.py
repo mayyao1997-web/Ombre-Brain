@@ -208,7 +208,7 @@ def _link_buckets(a_id: str, b_id: str) -> None:
 # ─────────────────────────────────────────────────────────────
 @mcp.tool()
 async def breath(
-    query: Optional[str] = None,s
+    query: Optional[str] = None
     max_results: int = 3,
     domain: str = "",
     valence: float = -1,
