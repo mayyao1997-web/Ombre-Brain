@@ -21,7 +21,7 @@ CALL_MAY = re.compile(r"(叫|找|通知|呼唤|喊).{0,8}May", re.IGNORECASE)
 intents = discord.Intents.default()
 intents.guilds = True
 intents.guild_messages = True
-intents.message_content = False
+intents.message_content = True
 client = discord.Client(intents=intents)
 llm = AsyncOpenAI(
     api_key=os.environ["OMBRE_API_KEY"],
