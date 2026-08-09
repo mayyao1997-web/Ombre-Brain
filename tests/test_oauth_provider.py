@@ -76,10 +76,11 @@ class OAuthProviderTests(unittest.TestCase):
                 self.assertIsNotNone(
                     asyncio.run(restored.load_access_token(rotated.access_token))
                 )
-                state_mode = Path(
-                    root, ".oauth-state.json"
-                ).stat().st_mode & 0o777
-                self.assertEqual(state_mode, 0o600)
+                if os.name != "nt":
+                    state_mode = Path(
+                        root, ".oauth-state.json"
+                    ).stat().st_mode & 0o777
+                    self.assertEqual(state_mode, 0o600)
 
 
 if __name__ == "__main__":
