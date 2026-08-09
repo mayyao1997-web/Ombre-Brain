@@ -1,9 +1,10 @@
 # ============================================================
-# Ombre Brain and StackChan 187 bridge dependencies
+# Ombre Brain, StackChan bridge, and Discord 187 dependencies
 # ============================================================
 
 mcp==1.28.1
 mcp2xiaozhi==0.2.1
+discord.py==2.6.4
 
 rapidfuzz>=3.0.0
 openai>=1.0.0
