@@ -157,6 +157,20 @@ class OmbreOAuthProvider(
         self.clients[client_info.client_id] = client_info
         self._save_state()
 
+    def openid_configuration(self) -> dict[str, Any]:
+        """OAuth metadata compatibility response for clients that probe OIDC."""
+        return {
+            "issuer": self.origin,
+            "authorization_endpoint": self.origin + "/authorize",
+            "token_endpoint": self.origin + "/token",
+            "registration_endpoint": self.origin + "/register",
+            "scopes_supported": [SCOPE],
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_methods_supported": ["none"],
+            "code_challenge_methods_supported": ["S256"],
+        }
+
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
