@@ -19,6 +19,7 @@ Configure these values only in Render Environment:
 Do not add a `.env` file to GitHub.
 
 The runtime-generated configuration is stored in a mode-`0600` temporary file.
-Production logging is fixed to INFO. Only `pulse` and `breath` are advertised
-or callable through the bridge. `hold`, `grow`, `trace`, `links`, and
-`link_buckets` are explicitly denied.
+Production logging is fixed to INFO. The physical 187 bridge advertises all
+current Ombre tools: `pulse`, `breath`, `hold`, `grow`, `trace`, `links`, and
+`link_buckets`. Discord remains separately constrained to its hard-coded
+read-only `breath` call.
