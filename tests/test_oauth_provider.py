@@ -43,6 +43,19 @@ class OAuthProviderTests(unittest.TestCase):
                 self.assertEqual(token.scopes, [SCOPE])
                 self.assertIsNone(asyncio.run(provider.load_access_token("wrong")))
 
+    def test_openid_compatibility_metadata_uses_oauth_endpoints(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch.dict(os.environ, self.environment(root), clear=True):
+                metadata = OmbreOAuthProvider().openid_configuration()
+                self.assertEqual(metadata["issuer"], "https://ombre.example")
+                self.assertEqual(
+                    metadata["authorization_endpoint"],
+                    "https://ombre.example/authorize",
+                )
+                self.assertEqual(metadata["token_endpoint"], "https://ombre.example/token")
+                self.assertEqual(metadata["registration_endpoint"], "https://ombre.example/register")
+                self.assertEqual(metadata["code_challenge_methods_supported"], ["S256"])
+
     def test_access_and_refresh_tokens_rotate_and_persist(self):
         with tempfile.TemporaryDirectory() as root:
             with patch.dict(os.environ, self.environment(root), clear=True):
