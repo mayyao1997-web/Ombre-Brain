@@ -132,5 +132,38 @@ class OAuthProviderTests(unittest.TestCase):
                 self.assertEqual(restored.pending["pending-state"]["attempts"], 1)
 
 
+    def test_repeated_valid_login_does_not_expire_authorization_request(self):
+        class FormRequest:
+            async def form(self):
+                return {
+                    "state": "pending-state",
+                    "username": "May",
+                    "password": "oauth-password-with-entropy",
+                }
+
+        with tempfile.TemporaryDirectory() as root:
+            with patch.dict(os.environ, self.environment(root), clear=True):
+                provider = OmbreOAuthProvider()
+                provider.pending["pending-state"] = {
+                    "oauth_state": "chatgpt-state",
+                    "redirect_uri": "https://chatgpt.com/callback",
+                    "redirect_uri_provided_explicitly": True,
+                    "code_challenge": "c" * 43,
+                    "client_id": "chatgpt-client",
+                    "resource": provider.resource,
+                    "expires_at": 4102444800,
+                    "attempts": 2,
+                }
+
+                first = asyncio.run(provider.login_callback(FormRequest()))
+                second = asyncio.run(provider.login_callback(FormRequest()))
+
+                self.assertEqual(first.status_code, 302)
+                self.assertEqual(second.status_code, 302)
+                self.assertIn("pending-state", provider.pending)
+                self.assertEqual(provider.pending["pending-state"]["attempts"], 0)
+                self.assertEqual(len(provider.auth_codes), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

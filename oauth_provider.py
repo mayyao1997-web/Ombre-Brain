@@ -168,7 +168,7 @@ class OmbreOAuthProvider(
             "code_challenge": params.code_challenge,
             "client_id": client.client_id,
             "resource": params.resource or self.resource,
-            "expires_at": time.time() + 600,
+            "expires_at": time.time() + 1800,
             "attempts": 0,
         }
         self._save_state()
@@ -227,7 +227,10 @@ button{{cursor:pointer}}</style></head>
             self._save_state()
             raise HTTPException(401, "Invalid credentials")
 
-        self.pending.pop(state, None)
+        # Keep the request alive until its short expiry. Render can be slow enough
+        # that a user submits twice; each valid submission receives its own
+        # distinct, single-use authorization code.
+        pending["attempts"] = 0
 
         code_value = secrets.token_urlsafe(32)
         code = AuthorizationCode(
