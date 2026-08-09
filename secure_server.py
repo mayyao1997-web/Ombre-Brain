@@ -10,7 +10,7 @@ import secrets
 import uvicorn
 from starlette.middleware.cors import CORSMiddleware
 
-from server import mcp
+from server import mcp, oauth_provider
 
 
 MCP_PATH = "/mcp"
@@ -72,7 +72,10 @@ class MCPBearerAuth:
 def create_app():
     token = _required_token()
     app = mcp.streamable_http_app()
-    app.add_middleware(MCPBearerAuth, token=token)
+    # With OAuth enabled, FastMCP's standards-compliant auth middleware accepts
+    # both OAuth access tokens and the existing trusted OMBRE_MCP_TOKEN.
+    if oauth_provider is None:
+        app.add_middleware(MCPBearerAuth, token=token)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[],
