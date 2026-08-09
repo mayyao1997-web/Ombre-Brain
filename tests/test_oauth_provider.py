@@ -5,7 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from mcp.server.auth.provider import AuthorizationCode
 from mcp.shared.auth import OAuthClientInformationFull
+from pydantic import AnyHttpUrl
+from starlette.exceptions import HTTPException
 from oauth_provider import OmbreOAuthProvider, SCOPE, public_url
 
 
@@ -81,6 +84,52 @@ class OAuthProviderTests(unittest.TestCase):
                         root, ".oauth-state.json"
                     ).stat().st_mode & 0o777
                     self.assertEqual(state_mode, 0o600)
+
+
+    def test_handshake_survives_restart_and_bad_login_does_not_consume_state(self):
+        class FormRequest:
+            async def form(self):
+                return {
+                    "state": "pending-state",
+                    "username": "May",
+                    "password": "wrong-password",
+                }
+
+        with tempfile.TemporaryDirectory() as root:
+            with patch.dict(os.environ, self.environment(root), clear=True):
+                provider = OmbreOAuthProvider()
+                provider.pending["pending-state"] = {
+                    "oauth_state": "chatgpt-state",
+                    "redirect_uri": "https://chatgpt.com/callback",
+                    "redirect_uri_provided_explicitly": True,
+                    "code_challenge": "c" * 43,
+                    "client_id": "chatgpt-client",
+                    "resource": provider.resource,
+                    "expires_at": 4102444800,
+                    "attempts": 0,
+                }
+                code = AuthorizationCode(
+                    code="authorization-code",
+                    scopes=[SCOPE],
+                    expires_at=4102444800,
+                    client_id="chatgpt-client",
+                    code_challenge="c" * 43,
+                    redirect_uri=AnyHttpUrl("https://chatgpt.com/callback"),
+                    redirect_uri_provided_explicitly=True,
+                    resource=provider.resource,
+                    subject="May",
+                )
+                provider.auth_codes["code-hash"] = code
+                provider._save_state()
+
+                restored = OmbreOAuthProvider()
+                self.assertIn("pending-state", restored.pending)
+                self.assertIn("code-hash", restored.auth_codes)
+
+                with self.assertRaises(HTTPException):
+                    asyncio.run(restored.login_callback(FormRequest()))
+                self.assertIn("pending-state", restored.pending)
+                self.assertEqual(restored.pending["pending-state"]["attempts"], 1)
 
 
 if __name__ == "__main__":
