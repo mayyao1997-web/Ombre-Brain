@@ -4,6 +4,7 @@ import logging
 import os
 
 import discord
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from openai import AsyncOpenAI
@@ -32,17 +33,18 @@ llm = AsyncOpenAI(
 
 async def read_memory(query: str) -> str:
     headers = {"Authorization": f"Bearer {MCP_TOKEN}"}
-    async with streamable_http_client(
-        "http://127.0.0.1:8000/mcp", headers=headers
-    ) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(
-                "breath", {"query": query, "max_results": 3}
-            )
-            return "\n".join(
-                item.text for item in result.content if hasattr(item, "text")
-            )[:6000]
+    async with httpx.AsyncClient(headers=headers) as http_client:
+        async with streamable_http_client(
+            "http://127.0.0.1:8000/mcp", http_client=http_client
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(
+                    "breath", {"query": query, "max_results": 3}
+                )
+                return "\n".join(
+                    item.text for item in result.content if hasattr(item, "text")
+                )[:6000]
 
 
 def clean_mention(message: discord.Message) -> str:
