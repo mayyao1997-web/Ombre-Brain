@@ -113,6 +113,16 @@ class OmbreOAuthProvider(
             for key, value in raw.get("refresh_tokens", {}).items()
             if int(value.get("expires_at", 0)) > now
         }
+        self.auth_codes = {
+            key: AuthorizationCode.model_validate(value)
+            for key, value in raw.get("auth_codes", {}).items()
+            if float(value.get("expires_at", 0)) > now
+        }
+        self.pending = {
+            key: value
+            for key, value in raw.get("pending", {}).items()
+            if float(value.get("expires_at", 0)) > now
+        }
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,6 +133,11 @@ class OmbreOAuthProvider(
             },
             "access_tokens": self.access_tokens,
             "refresh_tokens": self.refresh_tokens,
+            "auth_codes": {
+                key: value.model_dump(mode="json", exclude_none=True)
+                for key, value in self.auth_codes.items()
+            },
+            "pending": self.pending,
         }
         temporary = self.state_path.with_suffix(".tmp")
         temporary.write_text(
@@ -154,13 +169,18 @@ class OmbreOAuthProvider(
             "client_id": client.client_id,
             "resource": params.resource or self.resource,
             "expires_at": time.time() + 600,
+            "attempts": 0,
         }
+        self._save_state()
         return f"{self.origin}/oauth/login?state={state_key}"
 
     async def login_page(self, request: Request) -> HTMLResponse:
         state = request.query_params.get("state", "")
         pending = self.pending.get(state)
         if not pending or pending["expires_at"] < time.time():
+            if pending:
+                self.pending.pop(state, None)
+                self._save_state()
             raise HTTPException(400, "Invalid or expired authorization request")
         safe_state = html.escape(state, quote=True)
         return HTMLResponse(
@@ -195,13 +215,19 @@ button{{cursor:pointer}}</style></head>
         if not all(isinstance(value, str) for value in (state, username, password)):
             raise HTTPException(400, "Invalid login request")
 
-        pending = self.pending.pop(state, None)
+        pending = self.pending.get(state)
         if not pending or pending["expires_at"] < time.time():
             raise HTTPException(400, "Invalid or expired authorization request")
         valid_user = secrets.compare_digest(username, self.username)
         valid_password = secrets.compare_digest(password, self.password)
         if not (valid_user and valid_password):
+            pending["attempts"] = int(pending.get("attempts", 0)) + 1
+            if pending["attempts"] >= 5:
+                self.pending.pop(state, None)
+            self._save_state()
             raise HTTPException(401, "Invalid credentials")
+
+        self.pending.pop(state, None)
 
         code_value = secrets.token_urlsafe(32)
         code = AuthorizationCode(
@@ -218,6 +244,7 @@ button{{cursor:pointer}}</style></head>
             subject=self.username,
         )
         self.auth_codes[_digest(code_value)] = code
+        self._save_state()
         return RedirectResponse(
             construct_redirect_uri(
                 pending["redirect_uri"],
@@ -246,6 +273,7 @@ button{{cursor:pointer}}</style></head>
         code_hash = _digest(authorization_code.code)
         if self.auth_codes.pop(code_hash, None) is None:
             raise TokenError("invalid_grant", "Authorization code is invalid or used")
+        self._save_state()
         return self._issue_tokens(
             client_id=client.client_id or "",
             scopes=authorization_code.scopes,
