@@ -31,7 +31,7 @@ llm = AsyncOpenAI(
 
 
 async def read_memory(query: str) -> str:
-    headers = {"Authorization": `Bearer ${MCP_TOKEN}`}
+    headers = {"Authorization": f"Bearer {MCP_TOKEN}"}
     async with streamable_http_client(
         "http://127.0.0.1:8000/mcp", headers=headers
     ) as (read, write, _):
