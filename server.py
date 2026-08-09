@@ -93,7 +93,14 @@ mcp = FastMCP(
 
 if oauth_provider is not None:
     from starlette.requests import Request
-    from starlette.responses import Response
+    from starlette.responses import JSONResponse, Response
+
+    @mcp.custom_route("/.well-known/openid-configuration", methods=["GET"])
+    async def oauth_openid_configuration(request: Request) -> Response:
+        return JSONResponse(
+            oauth_provider.openid_configuration(),
+            headers={"Cache-Control": "public, max-age=300"},
+        )
 
     @mcp.custom_route("/oauth/login", methods=["GET"])
     async def oauth_login(request: Request) -> Response:
