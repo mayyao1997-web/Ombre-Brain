@@ -25,8 +25,17 @@ def require_environment() -> tuple[str, str, str, int]:
         raise RuntimeError("MCP_ENDPOINT_OMBRE_187 must be a wss:// URL")
     if urlparse(endpoint).query == "":
         raise RuntimeError("MCP_ENDPOINT_OMBRE_187 must include its XiaoZhi token")
-    if not ombre_url.startswith("https://") or not ombre_url.endswith("/mcp"):
-        raise RuntimeError("OMBRE_MCP_URL must be an https:// URL ending in /mcp")
+
+    parsed_ombre = urlparse(ombre_url)
+    secure_remote = parsed_ombre.scheme == "https"
+    safe_loopback = (
+        parsed_ombre.scheme == "http"
+        and parsed_ombre.hostname in {"127.0.0.1", "localhost", "::1"}
+    )
+    if (not secure_remote and not safe_loopback) or not ombre_url.endswith("/mcp"):
+        raise RuntimeError(
+            "OMBRE_MCP_URL must be HTTPS or an HTTP loopback URL ending in /mcp"
+        )
     if len(ombre_token) < 32:
         raise RuntimeError("OMBRE_MCP_TOKEN must contain at least 32 characters")
 
@@ -74,23 +83,22 @@ def main() -> None:
     endpoint, ombre_url, ombre_token, port = require_environment()
     config_path = write_private_config(build_config(endpoint, ombre_url, ombre_token))
 
-    # Never print the endpoint, authorization header, or generated config.
-    os.execvp(
+    command = [
         "mcp2xiaozhi",
-        [
-            "mcp2xiaozhi",
-            "--config",
-            str(config_path),
-            "--log-level",
-            "INFO",
-            "run",
-            "ombre-187",
-            "--metrics-port",
-            str(port),
-            "--metrics-host",
-            "0.0.0.0",
-        ],
-    )
+        "--config",
+        str(config_path),
+        "--log-level",
+        "INFO",
+        "run",
+        "ombre-187",
+    ]
+    if os.environ.get("BRIDGE_METRICS_ENABLED", "true").lower() == "true":
+        command.extend(
+            ["--metrics-port", str(port), "--metrics-host", "0.0.0.0"]
+        )
+
+    # Never print the endpoint, authorization header, or generated config.
+    os.execvp("mcp2xiaozhi", command)
 
 
 if __name__ == "__main__":

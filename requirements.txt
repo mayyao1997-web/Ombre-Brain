@@ -1,16 +1,12 @@
 # ============================================================
-# Ombre Brain Python dependencies
+# Ombre Brain and StackChan 187 bridge dependencies
 # ============================================================
 
-# Pin the SDK used by this legacy FastMCP server. A broad >=1 constraint can
-# cross into incompatible major releases during a clean Docker rebuild.
 mcp==1.28.1
+mcp2xiaozhi==0.2.1
 
 rapidfuzz>=3.0.0
-
-# OpenAI-compatible client (DeepSeek and other providers)
 openai>=1.0.0
-
 pyyaml>=6.0
 python-frontmatter>=1.1.0
 jieba>=0.42.1
