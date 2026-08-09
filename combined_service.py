@@ -32,8 +32,10 @@ def terminate(process: subprocess.Popen | None) -> None:
 def main() -> int:
     ombre = subprocess.Popen([sys.executable, "secure_server.py"])
     bridge: subprocess.Popen | None = None
+    discord_bot: subprocess.Popen | None = None
 
     def stop(*_args) -> None:
+        terminate(discord_bot)
         terminate(bridge)
         terminate(ombre)
 
@@ -58,15 +60,32 @@ def main() -> int:
                 "Ombre remains available"
             )
 
+        discord_keys = [
+            "DISCORD_BOT_TOKEN",
+            "DISCORD_ALLOWED_GUILD_ID",
+            "DISCORD_ALLOWED_CHANNEL_ID",
+            "MAY_DISCORD_USER_ID",
+        ]
+        configured = [bool(os.environ.get(key, "").strip()) for key in discord_keys]
+        if all(configured):
+            discord_bot = subprocess.Popen([sys.executable, "discord_bot.py"])
+            print("Discord 187 enabled; credentials and scope loaded from environment")
+        elif any(configured):
+            print("Discord 187 disabled: configuration is incomplete")
+        else:
+            print("Discord 187 disabled: no Discord configuration supplied")
+
         while True:
             if ombre.poll() is not None:
                 return ombre.returncode or 1
             if bridge is not None and bridge.poll() is not None:
                 return bridge.returncode or 1
+            if discord_bot is not None and discord_bot.poll() is not None:
+                return discord_bot.returncode or 1
             time.sleep(2)
     finally:
         stop()
-        for process in (bridge, ombre):
+        for process in (discord_bot, bridge, ombre):
             if process is not None:
                 try:
                     process.wait(timeout=10)
