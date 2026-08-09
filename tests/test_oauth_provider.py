@@ -158,8 +158,10 @@ class OAuthProviderTests(unittest.TestCase):
                 first = asyncio.run(provider.login_callback(FormRequest()))
                 second = asyncio.run(provider.login_callback(FormRequest()))
 
-                self.assertEqual(first.status_code, 302)
-                self.assertEqual(second.status_code, 302)
+                self.assertEqual(first.status_code, 200)
+                self.assertEqual(second.status_code, 200)
+                self.assertIn(b"https://chatgpt.com/callback", first.body)
+                self.assertIn(b"https://chatgpt.com/callback", second.body)
                 self.assertIn("pending-state", provider.pending)
                 self.assertEqual(provider.pending["pending-state"]["attempts"], 0)
                 self.assertEqual(len(provider.auth_codes), 2)
