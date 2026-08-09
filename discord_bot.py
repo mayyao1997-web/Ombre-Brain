@@ -2,12 +2,13 @@
 
 import logging
 import os
-import re
 
 import discord
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from openai import AsyncOpenAI
+
+from discord_intents import should_notify_may
 
 
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]
@@ -16,7 +17,6 @@ CHANNEL_ID = int(os.environ["DISCORD_ALLOWED_CHANNEL_ID"])
 MAY_ID = int(os.environ["MAY_DISCORD_USER_ID"])
 MCP_TOKEN = os.environ["OMBRE_MCP_TOKEN"]
 LLM_MODEL = os.environ.get("DISCORD_LLM_MODEL", "deepseek-chat")
-CALL_MAY = re.compile(r"(叫|找|通知|呼唤|喊).{0,8}May", re.IGNORECASE)
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -77,7 +77,7 @@ async def on_message(message: discord.Message):
         )
         return
 
-    if CALL_MAY.search(query):
+    if should_notify_may(query):
         may = discord.Object(id=MAY_ID)
         await message.channel.send(
             f"<@{MAY_ID}>，有人通过187呼唤你：{query[:300]}",
