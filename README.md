@@ -350,7 +350,7 @@ MIT
 - `OMBRE_OAUTH_PASSWORD`：至少 16 个字符的独立强密码
 
 配置后，服务会提供 OAuth 发现、动态客户端注册、PKCE 授权码和刷新令牌。
-OAuth 客户端及令牌状态仅以哈希形式保存在
+OAuth 客户端注册信息会持久化；访问令牌和刷新令牌仅以哈希形式保存在
 `$OMBRE_BUCKETS_DIR/.oauth-state.json`，文件权限为 `0600`。
 不要把这些值写进 Git、截图或日志。未配置
 `OMBRE_OAUTH_PASSWORD` 时 OAuth 保持关闭，原有 Bearer 鉴权继续工作。
