@@ -337,3 +337,20 @@ If using Claude Code, `.claude/settings.json` configures a `SessionStart` hook t
 ## License
 
 MIT
+
+
+## ChatGPT OAuth（可选）
+
+远程 `/mcp` 始终需要鉴权。可信服务器客户端继续使用
+`Authorization: Bearer <OMBRE_MCP_TOKEN>`。若要让 ChatGPT 自定义 MCP
+插件连接，可在部署平台的 Secret / Environment Variables 中额外设置：
+
+- `OMBRE_PUBLIC_URL`：服务的 HTTPS origin，例如 `https://example.onrender.com`
+- `OMBRE_OAUTH_USERNAME`：OAuth 登录用户名
+- `OMBRE_OAUTH_PASSWORD`：至少 16 个字符的独立强密码
+
+配置后，服务会提供 OAuth 发现、动态客户端注册、PKCE 授权码和刷新令牌。
+OAuth 客户端及令牌状态仅以哈希形式保存在
+`$OMBRE_BUCKETS_DIR/.oauth-state.json`，文件权限为 `0600`。
+不要把这些值写进 Git、截图或日志。未配置
+`OMBRE_OAUTH_PASSWORD` 时 OAuth 保持关闭，原有 Bearer 鉴权继续工作。
