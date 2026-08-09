@@ -61,13 +61,47 @@ dehydrator = Dehydrator(config)                      # Dehydrator / 脱水器
 decay_engine = DecayEngine(config, bucket_mgr)       # Decay engine / 衰减引擎
 
 # --- Create MCP server instance / 创建 MCP 服务器实例 ---
-# host="0.0.0.0" so Docker container's SSE is externally reachable
-# stdio mode ignores host (no network)
+# OAuth is optional and fail-closed. Existing trusted clients continue to use
+# OMBRE_MCP_TOKEN; ChatGPT receives short-lived OAuth access tokens.
+oauth_provider = None
+oauth_auth = None
+if os.environ.get("OMBRE_OAUTH_PASSWORD", "").strip():
+    from pydantic import AnyHttpUrl
+    from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+    from oauth_provider import OmbreOAuthProvider, SCOPE
+
+    oauth_provider = OmbreOAuthProvider()
+    oauth_auth = AuthSettings(
+        issuer_url=AnyHttpUrl(oauth_provider.origin),
+        resource_server_url=AnyHttpUrl(oauth_provider.resource),
+        required_scopes=[SCOPE],
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True,
+            valid_scopes=[SCOPE],
+            default_scopes=[SCOPE],
+        ),
+    )
+
+# host="0.0.0.0" so Docker container's HTTP service is externally reachable.
 mcp = FastMCP(
     "Ombre Brain",
     host="0.0.0.0",
     port=8000,
+    auth_server_provider=oauth_provider,
+    auth=oauth_auth,
 )
+
+if oauth_provider is not None:
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    @mcp.custom_route("/oauth/login", methods=["GET"])
+    async def oauth_login(request: Request) -> Response:
+        return await oauth_provider.login_page(request)
+
+    @mcp.custom_route("/oauth/login/callback", methods=["POST"])
+    async def oauth_login_callback(request: Request) -> Response:
+        return await oauth_provider.login_callback(request)
 
 
 # =============================================================
