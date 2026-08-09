@@ -248,14 +248,32 @@ button{{cursor:pointer}}</style></head>
         )
         self.auth_codes[_digest(code_value)] = code
         self._save_state()
-        return RedirectResponse(
-            construct_redirect_uri(
-                pending["redirect_uri"],
-                code=code_value,
-                state=pending["oauth_state"],
-                iss=self.origin,
-            ),
-            status_code=302,
+        callback_uri = construct_redirect_uri(
+            pending["redirect_uri"],
+            code=code_value,
+            state=pending["oauth_state"],
+            iss=self.origin,
+        )
+        safe_callback_uri = html.escape(callback_uri, quote=True)
+        return HTMLResponse(
+            f"""<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>授权成功</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="1;url={safe_callback_uri}">
+<style>body{{font-family:system-ui;max-width:420px;margin:60px auto;padding:24px}}
+a{{display:block;padding:12px;text-align:center;background:#111;color:#fff;
+text-decoration:none;border-radius:8px}}</style></head>
+<body><h2>授权成功</h2><p>正在返回 ChatGPT。如果没有自动跳转，请点击下面的按钮。</p>
+<a href="{safe_callback_uri}">继续返回 ChatGPT</a></body></html>""",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": (
+                    "default-src 'none'; style-src 'unsafe-inline'; "
+                    "base-uri 'none'; frame-ancestors 'none'"
+                ),
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     async def load_authorization_code(
