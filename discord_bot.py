@@ -1,5 +1,6 @@
 """Mention-only Discord interface for 187."""
 
+import logging
 import os
 import re
 
@@ -120,4 +121,4 @@ async def on_message(message: discord.Message):
     )
 
 
-client.run(TOKEN, log_level=discord.utils.MISSING)
+client.run(TOKEN, log_level=logging.INFO)
