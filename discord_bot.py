@@ -23,6 +23,7 @@ intents.guilds = True
 intents.guild_messages = True
 intents.message_content = True
 client = discord.Client(intents=intents)
+logger = logging.getLogger("discord_187")
 llm = AsyncOpenAI(
     api_key=os.environ["OMBRE_API_KEY"],
     base_url=os.environ.get("OMBRE_BASE_URL", "https://api.deepseek.com/v1"),
@@ -93,6 +94,11 @@ async def on_message(message: discord.Message):
     async with message.channel.typing():
         try:
             memory = await read_memory(query)
+        except Exception as exc:
+            logger.warning("read-only memory lookup failed: %s", type(exc).__name__)
+            memory = "长期记忆暂时不可用；请仅根据当前消息回答。"
+
+        try:
             response = await llm.chat.completions.create(
                 model=LLM_MODEL,
                 messages=[
@@ -112,8 +118,9 @@ async def on_message(message: discord.Message):
                 max_tokens=500,
             )
             text = response.choices[0].message.content or "187暂时没有想到合适的回答。"
-        except Exception:
-            text = "187暂时无法读取记忆，请稍后再试。"
+        except Exception as exc:
+            logger.error("Discord language-model call failed: %s", type(exc).__name__)
+            text = "187暂时无法生成回复，请稍后再试。"
 
     await message.reply(
         text[:1800],
