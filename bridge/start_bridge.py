@@ -11,8 +11,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-ALLOWED_TOOLS = ["pulse", "breath"]
-DENIED_TOOLS = ["hold", "grow", "trace", "links", "link_buckets"]
+ALLOWED_TOOLS = [
+    "pulse",
+    "breath",
+    "hold",
+    "grow",
+    "trace",
+    "links",
+    "link_buckets",
+]
+DENIED_TOOLS = []
 
 
 def require_environment() -> tuple[str, str, str, int]:
